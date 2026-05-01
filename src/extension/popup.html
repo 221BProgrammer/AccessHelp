@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            width: 320px;
+            padding: 15px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        button {
+            width: 100%;
+            margin: 8px 0;
+            padding: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+        
+        button:hover {
+            background: #764ba2;
+            transform: translateY(-1px);
+        }
+        
+        .status {
+            font-size: 12px;
+            text-align: center;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+        
+        .status.online {
+            color: #4CAF50;
+        }
+        
+        .status.offline {
+            color: #f44336;
+        }
+        
+        .toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        
+        .toggle label {
+            font-size: 12px;
+            color: #666;
+            cursor: pointer;
+        }
+        
+        .info {
+            font-size: 11px;
+            color: #999;
+            text-align: center;
+            margin-top: 10px;
+        }
+        
+        .badge {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h3>
+            🔊 AccessHelp Assistant
+            <span class="badge">v1.0</span>
+        </h3>
+        
+        <button id="readSelection">📖 Read Selected Text</button>
+        <button id="summarizePage">📝 Summarize Page</button>
+        
+        <div class="toggle">
+            <label>🔘 Floating Button</label>
+            <input type="checkbox" id="toggleButton" checked>
+        </div>
+        
+        <div class="status" id="status">
+            🔍 Checking connection...
+        </div>
+        
+        <div class="info">
+            Connected to AccessHelp on port 8501<br>
+            Make sure AccessHelp is running: <code>streamlit run ui.py</code>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = 'http://localhost:8501';
+        
+        // Check connection status
+        async function checkConnection() {
+            const statusDiv = document.getElementById('status');
+            try {
+                const response = await fetch(`${API_BASE}`, { method: 'HEAD', mode: 'no-cors' });
+                statusDiv.textContent = '✅ Connected to AccessHelp';
+                statusDiv.className = 'status online';
+            } catch (error) {
+                statusDiv.textContent = '⚠️ AccessHelp not running (start: streamlit run ui.py)';
+                statusDiv.className = 'status offline';
+            }
+        }
+        
+        // Get current tab and send message
+        async function sendToTab(action, text = null) {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+            
+            if (action === 'read' && text) {
+                chrome.tabs.sendMessage(tab.id, {action: 'read', text: text});
+            } else if (action === 'summarize') {
+                chrome.tabs.sendMessage(tab.id, {action: 'summarize', text: text || 'page'});
+            }
+            
+            // Close popup
+            window.close();
+        }
+        
+        // Read selected text
+        document.getElementById('readSelection').onclick = async () => {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+            chrome.scripting.executeScript({
+                target: {tabId: tab.id},
+                function: () => window.getSelection().toString()
+            }, (results) => {
+                const text = results[0].result;
+                if (text && text.length > 0) {
+                    sendToTab('read', text);
+                } else {
+                    alert('Please select some text first');
+                }
+            });
+        };
+        
+        // Summarize page
+        document.getElementById('summarizePage').onclick = async () => {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+            chrome.scripting.executeScript({
+                target: {tabId: tab.id},
+                function: () => document.body.innerText.substring(0, 2000)
+            }, (results) => {
+                const text = results[0].result;
+                sendToTab('summarize', text);
+            });
+        };
+        
+        // Toggle floating button
+        const toggleButton = document.getElementById('toggleButton');
+        chrome.storage.local.get(['enableFloatingButton'], (result) => {
+            toggleButton.checked = result.enableFloatingButton !== false;
+        });
+        
+        toggleButton.onchange = () => {
+            chrome.storage.local.set({enableFloatingButton: toggleButton.checked});
+            
+            // Update all tabs
+            chrome.tabs.query({}, (tabs) => {
+                tabs.forEach(tab => {
+                    chrome.tabs.sendMessage(tab.id, {
+                        action: "toggleButton",
+                        enabled: toggleButton.checked
+                    }).catch(() => {});
+                });
+            });
+        };
+        
+        // Check connection on load
+        checkConnection();
+        
+        // Check connection every 10 seconds
+        setInterval(checkConnection, 10000);
+    </script>
+</body>
+</html>
